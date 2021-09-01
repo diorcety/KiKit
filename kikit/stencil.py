@@ -1,10 +1,12 @@
 from kikit.pcbnew_compatibility import pcbnew
 from pcbnew import wxPoint
 import numpy as np
+import math
 from kikit.common import *
 from kikit.defs import *
 from kikit.substrate import Substrate, extractRings, toShapely, linestringToKicad
 from kikit.export import gerberImpl, pasteDxfExport
+from kikit.units import readLength
 from kikit.export import exportSettingsJlcpcb
 import solid
 import solid.utils
@@ -14,8 +16,8 @@ from kikit.common import removeComponents, parseReferences
 from shapely.geometry import Point
 
 
-OUTER_BORDER = fromMm(7.5)
-INNER_BORDER = fromMm(5)
+OUTER_BORDER = fromMm(5)
+INNER_BORDER = fromMm(7.5)
 MOUNTING_HOLES_COUNT = 3
 MOUNTING_HOLE_R = fromMm(1)
 HOLE_SPACING = fromMm(20)
@@ -163,66 +165,89 @@ def addJigFrame(board, jigFrameSize, bridgeWidth=fromMm(2),
     addHole(board, br(frameSize) + wxPoint(-OUTER_BORDER / 2, -OUTER_BORDER / 2), MOUNTING_HOLE_R + PIN_TOLERANCE)
     addHole(board, bl(frameSize) + wxPoint(OUTER_BORDER / 2, -OUTER_BORDER / 2), MOUNTING_HOLE_R + PIN_TOLERANCE)
 
-def jigMountingHoles(jigFrameSize, origin=wxPoint(0, 0)):
+def jigMountingHoles(jigFrameSize, spacing, origin=wxPoint(0, 0)):
     """ Get list of all mounting holes in a jig of given size """
     w, h = jigFrameSize
+    midspacing = spacing/2
+    wMm = math.ceil(w/2/midspacing)*midspacing
+    hMm = math.ceil(h/2/midspacing)*midspacing
+
     holes = [
-        wxPoint(0, (w + INNER_BORDER) / 2),
-        wxPoint(0, -(w + INNER_BORDER) / 2),
-        wxPoint((h + INNER_BORDER) / 2, 0),
-        wxPoint(-(h + INNER_BORDER) / 2, 0),
+        wxPoint(-hMm, wMm),
+        wxPoint(-hMm, -wMm),
+        wxPoint(hMm, wMm),
+        wxPoint(hMm, -wMm),
     ]
     return [x + origin for x in holes]
 
-def createOuterPolygon(board, jigFrameSize, outerBorder):
+def cornerToolingHoles(board, type, hoffset, voffset,
+                     size, paste=False):
+    size = int(readLength(size))
+    voffset = int(readLength(voffset))
+    hoffset = int(readLength(hoffset))
+    if paste in ["1", "true", "yes"]:
+        boardSubstrate = Substrate(collectEdges(board, "Edge.Cuts"))
+        minx, miny, maxx, maxy = boardSubstrate.bounds()
+        topLeft = wxPoint(minx + hoffset, miny + voffset)
+        topRight = wxPoint(maxx - hoffset, miny + voffset)
+        bottomLeft = wxPoint(minx + hoffset, maxy - voffset)
+        bottomRight = wxPoint(maxx - hoffset, maxy - voffset)
+        return size, [topLeft, topRight, bottomLeft, bottomRight]
+    else:
+        return size, []
+
+
+def createOuterPolygon(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, outerBorder, withHoles=True):
     bBox = findBoardBoundingBox(board)
     centerpoint = rectCenter(bBox)
-    holes = jigMountingHoles(jigFrameSize, centerpoint)
+    holes = jigMountingHoles(jigFrameSize, jigMountingHoleSpacing, centerpoint)
 
     outerSubstrate = Substrate(collectEdges(board, "Edge.Cuts"))
     outerSubstrate.substrates = outerSubstrate.substrates.buffer(outerBorder)
-    tabs = []
-    for hole in holes:
-        tab, _ = outerSubstrate.tab(hole, centerpoint - hole, INNER_BORDER, maxHeight=fromMm(1000))
-        tabs.append(tab)
-    outerSubstrate.union(tabs)
-    outerSubstrate.union([Point(x).buffer(INNER_BORDER / 2) for x in holes])
-    outerSubstrate.millFillets(fromMm(3))
-    return outerSubstrate.exterior(), holes
+    if withHoles:
+        tabs = []
+        for hole in holes:
+            tab, _ = outerSubstrate.tab(hole, centerpoint - hole, INNER_BORDER + jigMountingHoleSize, maxHeight=fromMm(1000))
+            tabs.append(tab)
+        outerSubstrate.union(tabs)
+        outerSubstrate.union([Point(x).buffer((INNER_BORDER + jigMountingHoleSize)/ 2) for x in holes])
+        outerSubstrate.millFillets(fromMm(3))
+        return outerSubstrate.exterior(), holes
+    else:
+        return outerSubstrate.exterior()
 
 def createOffsetPolygon(board, offset):
     outerSubstrate = Substrate(collectEdges(board, "Edge.Cuts"))
-    outerSubstrate.substrates = outerSubstrate.substrates.buffer(offset)
-    return outerSubstrate.exterior()
+    return outerSubstrate.exterior().buffer(offset)
 
-def m2countersink():
-    HEAD_DIA = fromMm(4.5)
-    HOLE_LEN = fromMm(10)
-    SINK_EXTRA = fromMm(0.3)
-    sinkH = np.sqrt(HEAD_DIA**2 / 4)
-
-    sink = solid.cylinder(d1=0, d2=HEAD_DIA, h=sinkH)
-    sinkE = solid.cylinder(d=HEAD_DIA, h=SINK_EXTRA)
-    hole = solid.cylinder(h=HOLE_LEN, d=fromMm(2))
-    return sinkE + solid.utils.down(sinkH)(sink) + solid.utils.down(HOLE_LEN)(hole)
+def createHole(thickness, diameter):
+    hole = solid.cylinder(h=thickness, d=diameter)
+    return solid.utils.down(thickness)(hole)
 
 def mirrorX(linestring, origin):
     return [(2 * origin - x, y) for x, y in linestring]
 
-def makeRegister(board, jigFrameSize, jigThickness, pcbThickness,
+def makeRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, jigThickness,
+                 pcbThickness, tooling,
                  outerBorder, innerBorder, tolerance, topSide):
     bBox = findBoardBoundingBox(board)
     centerpoint = rectCenter(bBox)
+    tabThickness, jigThickness = jigThickness
 
     top = jigThickness - fromMm(0.15)
     pcbBottom = jigThickness - pcbThickness
 
-    outerPolygon, holes = createOuterPolygon(board, jigFrameSize, outerBorder)
+    outerPolygon, holes = createOuterPolygon(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, outerBorder)
+    outerPolygonWithoutHoles = createOuterPolygon(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, outerBorder, False)
     outerRing = outerPolygon.exterior.coords
+    outerRingWithoutHoles = outerPolygonWithoutHoles.exterior.coords
     if topSide:
         outerRing = mirrorX(outerRing, centerpoint[0])
-    body = solid.linear_extrude(height=top, convexity=10)(solid.polygon(
+        outerRingWithoutHoles = mirrorX(outerRingWithoutHoles, centerpoint[0])
+    body = solid.linear_extrude(height=tabThickness, convexity=10)(solid.polygon(
         outerRing))
+    body = body + solid.linear_extrude(height=top, convexity=10)(solid.polygon(
+        outerRingWithoutHoles))
 
     innerRing = createOffsetPolygon(board, - innerBorder).exterior.coords
     if topSide:
@@ -236,29 +261,34 @@ def makeRegister(board, jigFrameSize, jigThickness, pcbThickness,
         solid.linear_extrude(height=jigThickness, convexity=10)(solid.polygon(registerRing)))
 
     register = body - innerCutout - registerCutout
+    holeSize = jigMountingHoleSize + tolerance
     for hole in holes:
-        register = register - solid.translate([hole[0], hole[1], top])(m2countersink())
+        register = register - solid.translate([hole[0], hole[1], top])(createHole(jigThickness, holeSize))
+    holeSize, holes = cornerToolingHoles(board, **tooling)
+    holeSize += tolerance
+    for hole in holes:
+        register = register - solid.translate([hole[0], hole[1], top])(createHole(jigThickness, holeSize))
     return solid.scale(toMm(1))(
             solid.translate([-centerpoint[0], -centerpoint[1], 0])(register))
 
-def makeTopRegister(board, jigFrameSize, jigThickness, pcbThickness,
+def makeTopRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, jigThickness, pcbThickness, tooling,
                     outerBorder=fromMm(3), innerBorder=fromMm(1),
                     tolerance=fromMm(0.05)):
     """
     Create a SolidPython representation of the top register
     """
     print("Top")
-    return makeRegister(board, jigFrameSize, jigThickness, pcbThickness,
+    return makeRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, jigThickness, pcbThickness, tooling,
             outerBorder, innerBorder, tolerance, True)
 
-def makeBottomRegister(board, jigFrameSize, jigThickness, pcbThickness,
+def makeBottomRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, jigThickness, pcbThickness, tooling,
                     outerBorder=fromMm(3), innerBorder=fromMm(1),
                     tolerance=fromMm(0.05)):
     """
     Create a SolidPython representation of the top register
     """
     print("Bottom")
-    return makeRegister(board, jigFrameSize, jigThickness, pcbThickness,
+    return makeRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, jigThickness, pcbThickness, tooling,
             outerBorder, innerBorder, tolerance, False)
 
 def renderScad(infile, outfile):
@@ -292,7 +322,7 @@ def cutoutComponents(board, components):
 from pathlib import Path
 import os
 
-def create(inputboard, outputdir, jigsize, jigthickness, pcbthickness,
+def create(inputboard, outputdir, jigsize, jigmountingholespacing, jigmountingholesize, jigthickness, pcbthickness, tooling,
            registerborder, tolerance, ignore, cutout):
     board = pcbnew.LoadBoard(inputboard)
     refs = parseReferences(ignore)
@@ -322,13 +352,15 @@ def create(inputboard, outputdir, jigsize, jigthickness, pcbthickness,
     subprocess.check_call(["zip", "-j",
         os.path.join(outputdir, "gerbers.zip")] + gerbers)
 
-    jigthickness = fromMm(jigthickness)
+    jigthickness = tuple([fromMm(a) for a in jigthickness])
     pcbthickness = fromMm(pcbthickness)
+    jigmountingholespacing = fromMm(jigmountingholespacing)
+    jigmountingholesize = fromMm(jigmountingholesize)
     outerBorder, innerBorder = fromMm(registerborder[0]), fromMm(registerborder[1])
     tolerance = fromMm(tolerance)
-    topRegister = makeTopRegister(board, jigsize,jigthickness, pcbthickness,
+    topRegister = makeTopRegister(board, jigsize, jigmountingholespacing, jigmountingholesize, jigthickness, pcbthickness, tooling,
         outerBorder, innerBorder, tolerance)
-    bottomRegister = makeBottomRegister(board, jigsize,jigthickness, pcbthickness,
+    bottomRegister = makeBottomRegister(board, jigsize, jigmountingholespacing, jigmountingholesize, jigthickness, pcbthickness, tooling,
         outerBorder, innerBorder, tolerance)
 
     topRegisterFile = os.path.join(outputdir, "topRegister.scad")

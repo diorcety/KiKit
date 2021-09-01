@@ -1,5 +1,6 @@
 import click
 
+from .panelize_ui import Section
 
 @click.command()
 @click.argument("inputBoard", type=click.Path(dir_okay=False))
@@ -30,10 +31,16 @@ def createPrinted(**kwargs):
 @click.argument("outputDir", type=click.Path(dir_okay=True))
 @click.option("--jigsize", type=(int, int), default=(100, 100),
     help="Jig frame size in mm: <width> <height>")
-@click.option("--jigthickness", type=float, default=3,
+@click.option("--jigthickness", type=(float, float), default=(8, 10),
     help="Jig thickness in mm")
+@click.option("--jigmountingholespacing", type=float, default=30,
+    help="Job mounting hole spacing in mm")
+@click.option("--jigmountingholesize", type=float, default=6,
+    help="Job mounting hole size in mm")
 @click.option("--pcbthickness", type=float, default=1.6,
     help="PCB thickness in mm")
+@click.option("--tooling", "-o", type=Section(),
+    help="Override tooling settings")
 @click.option("--registerborder", type=(float, float), default=(3, 1),
     help="Register borders in mm: <outer> <inner>")
 @click.option("--tolerance", type=float, default=0.05,
