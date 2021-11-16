@@ -19,6 +19,7 @@ from shapely.geometry import Point
 
 
 OUTER_BORDER = fromMm(5)
+OUTER_MARGIN = fromMm(1)
 INNER_BORDER = fromMm(7.5)
 MOUNTING_HOLES_COUNT = 3
 MOUNTING_HOLE_R = fromMm(1)
@@ -148,27 +149,27 @@ def addJigFrame(board, jigFrameSize, bridgeWidth=fromMm(2),
     """
     bBox = findBoardBoundingBox(board)
     frameSize = rectByCenter(rectCenter(bBox),
-        jigFrameSize[0] + 2 * (OUTER_BORDER + INNER_BORDER),
-        jigFrameSize[1] + 2 * (OUTER_BORDER + INNER_BORDER))
+        jigFrameSize[0] + 2 * (OUTER_BORDER + INNER_BORDER + OUTER_MARGIN),
+        jigFrameSize[1] + 2 * (OUTER_BORDER + INNER_BORDER + OUTER_MARGIN))
     cutSize = rectByCenter(rectCenter(bBox),
-        jigFrameSize[0] + 2 * (OUTER_BORDER + INNER_BORDER) - fromMm(1),
-        jigFrameSize[1] + 2 * (OUTER_BORDER + INNER_BORDER) - fromMm(1))
+        jigFrameSize[0] + 2 * (OUTER_BORDER + INNER_BORDER + OUTER_MARGIN) - fromMm(1),
+        jigFrameSize[1] + 2 * (OUTER_BORDER + INNER_BORDER + OUTER_MARGIN) - fromMm(1))
     addFrame(board, cutSize, bridgeWidth, bridgeSpacing, clearance)
 
-    for i in range(MOUNTING_HOLES_COUNT):
-        x = frameSize.GetX() + OUTER_BORDER / 2 + (i + 1) * (frameSize.GetWidth() - OUTER_BORDER) / (MOUNTING_HOLES_COUNT + 1)
-        addHole(board, toKiCADPoint((x, OUTER_BORDER / 2 + frameSize.GetY())), MOUNTING_HOLE_R)
-        addHole(board, toKiCADPoint((x, - OUTER_BORDER / 2 +frameSize.GetY() + frameSize.GetHeight())), MOUNTING_HOLE_R)
-    for i in range(MOUNTING_HOLES_COUNT):
-        y = frameSize.GetY() + OUTER_BORDER / 2 + (i + 1) * (frameSize.GetHeight() - OUTER_BORDER) / (MOUNTING_HOLES_COUNT + 1)
-        addHole(board, toKiCADPoint((OUTER_BORDER / 2 + frameSize.GetX(), y)), MOUNTING_HOLE_R)
-        addHole(board, toKiCADPoint((- OUTER_BORDER / 2 +frameSize.GetX() + frameSize.GetWidth(), y)), MOUNTING_HOLE_R)
-
     PIN_TOLERANCE = fromMm(0.05)
-    addHole(board, tl(frameSize) + toKiCADPoint((OUTER_BORDER / 2, OUTER_BORDER / 2)), MOUNTING_HOLE_R + PIN_TOLERANCE)
-    addHole(board, tr(frameSize) + toKiCADPoint((-OUTER_BORDER / 2, OUTER_BORDER / 2)), MOUNTING_HOLE_R + PIN_TOLERANCE)
-    addHole(board, br(frameSize) + toKiCADPoint((-OUTER_BORDER / 2, -OUTER_BORDER / 2)), MOUNTING_HOLE_R + PIN_TOLERANCE)
-    addHole(board, bl(frameSize) + toKiCADPoint((OUTER_BORDER / 2, -OUTER_BORDER / 2)), MOUNTING_HOLE_R + PIN_TOLERANCE)
+    for i in range(MOUNTING_HOLES_COUNT):
+        x = frameSize.GetX() + OUTER_MARGIN + OUTER_BORDER / 2 + (i + 1) * (frameSize.GetWidth() - OUTER_BORDER - OUTER_MARGIN*2) / (MOUNTING_HOLES_COUNT + 1)
+        addHole(board, toKiCADPoint((x, OUTER_MARGIN + OUTER_BORDER / 2 + frameSize.GetY())), MOUNTING_HOLE_R + PIN_TOLERANCE)
+        addHole(board, toKiCADPoint((x, -OUTER_MARGIN - OUTER_BORDER / 2 + frameSize.GetY() + frameSize.GetHeight())), MOUNTING_HOLE_R + PIN_TOLERANCE)
+    for i in range(MOUNTING_HOLES_COUNT):
+        y = frameSize.GetY() + OUTER_MARGIN + OUTER_BORDER / 2 + (i + 1) * (frameSize.GetHeight() - OUTER_BORDER - OUTER_MARGIN*2) / (MOUNTING_HOLES_COUNT + 1)
+        addHole(board, toKiCADPoint((OUTER_MARGIN + OUTER_BORDER / 2 + frameSize.GetX(), y)), MOUNTING_HOLE_R + PIN_TOLERANCE)
+        addHole(board, toKiCADPoint((-OUTER_MARGIN - OUTER_BORDER / 2 + frameSize.GetX() + frameSize.GetWidth(), y)), MOUNTING_HOLE_R + PIN_TOLERANCE)
+
+    addHole(board, tl(frameSize) + toKiCADPoint((OUTER_MARGIN + OUTER_BORDER / 2, OUTER_MARGIN + OUTER_BORDER / 2)), MOUNTING_HOLE_R + PIN_TOLERANCE)
+    addHole(board, tr(frameSize) + toKiCADPoint((-OUTER_MARGIN -OUTER_BORDER / 2, OUTER_MARGIN + OUTER_BORDER / 2)), MOUNTING_HOLE_R + PIN_TOLERANCE)
+    addHole(board, br(frameSize) + toKiCADPoint((-OUTER_MARGIN -OUTER_BORDER / 2, -OUTER_MARGIN -OUTER_BORDER / 2)), MOUNTING_HOLE_R + PIN_TOLERANCE)
+    addHole(board, bl(frameSize) + toKiCADPoint((OUTER_MARGIN + OUTER_BORDER / 2, -OUTER_MARGIN -OUTER_BORDER / 2)), MOUNTING_HOLE_R + PIN_TOLERANCE)
 
 def jigMountingHoles(jigFrameSize, spacing, origin=toKiCADPoint((0, 0))):
     """ Get list of all mounting holes in a jig of given size """
