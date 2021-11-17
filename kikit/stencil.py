@@ -215,7 +215,7 @@ def createOuterPolygon(board, jigFrameSize, jigMountingHoleSpacing, jigMountingH
         outerSubstrate.millFillets(fromMm(3))
         return outerSubstrate.exterior(), holes
     else:
-        return outerSubstrate.exterior()
+        return outerSubstrate.exterior(), outerSubstrate.boundingBox()
 
 def createOffsetPolygon(board, offset):
     outerSubstrate = Substrate(collectEdges(board, "Edge.Cuts"))
@@ -239,7 +239,7 @@ def makeRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSiz
     pcbBottom = jigThickness - pcbThickness
 
     outerPolygon, holes = createOuterPolygon(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, outerBorder)
-    outerPolygonWithoutHoles = createOuterPolygon(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, outerBorder, False)
+    outerPolygonWithoutHoles, boundingBox = createOuterPolygon(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, outerBorder, False)
     outerRing = outerPolygon.exterior.coords
     outerRingWithoutHoles = outerPolygonWithoutHoles.exterior.coords
     if topSide:
@@ -269,12 +269,21 @@ def makeRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSiz
     holeSize += tolerance
     for hole in holes:
         register = register - solid.translate([hole[0], hole[1], top])(createHole(jigThickness, holeSize))
+
+    # Apertures
+    apertureSize = fromMm(20)
+    register = register - solid.translate([centerpoint[0], boundingBox.GetY(), jigThickness + apertureSize/2 - fromMm(5)])(
+           solid.rotate(a=-90, v=[1, 0, 0])(solid.cylinder(h=boundingBox.GetHeight(), d=apertureSize))
+    )
+    register = register - solid.translate([boundingBox.GetX(), centerpoint[1], jigThickness + apertureSize/2 - fromMm(5)])(
+           solid.rotate(a=90, v=[0, 1, 0])(solid.cylinder(h=boundingBox.GetWidth(), d=apertureSize))
+    )
     return solid.scale(toMm(1))(
             solid.translate([-centerpoint[0], -centerpoint[1], 0])(register))
 
 def makeTopRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, jigThickness, pcbThickness, tooling,
                     outerBorder=fromMm(3), innerBorder=fromMm(1),
-                    tolerance=fromMm(0.05)):
+                    tolerance=fromMm(0.075)):
     """
     Create a SolidPython representation of the top register
     """
@@ -284,7 +293,7 @@ def makeTopRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHole
 
 def makeBottomRegister(board, jigFrameSize, jigMountingHoleSpacing, jigMountingHoleSize, jigThickness, pcbThickness, tooling,
                     outerBorder=fromMm(3), innerBorder=fromMm(1),
-                    tolerance=fromMm(0.05)):
+                    tolerance=fromMm(0.075)):
     """
     Create a SolidPython representation of the top register
     """
